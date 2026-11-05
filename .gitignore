@@ -1,0 +1,22 @@
+# Secrets: each example's .env.example lists the names only.
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output.
+node_modules/
+.next/
+next-env.d.ts
+.svelte-kit/
+build/
+dist/
+*.tsbuildinfo
+vendor/
+__pycache__/
+.venv/
+.mypy_cache/
+
+# Editors and systems.
+.DS_Store
+.idea/
+.vscode/

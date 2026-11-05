@@ -1,0 +1,11 @@
+{
+  "name": "videxo/php-example",
+  "description": "A Videxo example with plain PHP and cURL.",
+  "type": "project",
+  "license": "MIT",
+  "require": {
+    "php": "^8.2",
+    "ext-curl": "*",
+    "standard-webhooks/standard-webhooks": "^1.0.2"
+  }
+}

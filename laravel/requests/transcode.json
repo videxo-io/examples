@@ -1,0 +1,6 @@
+{
+  "input": "https://example.com/talk.mp4",
+  "preset": "web-720p",
+  "filename": "talk-720p.mp4",
+  "metadata": { "source": "videxo-example" }
+}

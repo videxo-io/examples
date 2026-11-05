@@ -1,0 +1,9 @@
+{
+  "inputs": { "talk": "https://example.com/talk.mp4" },
+  "outputs": [
+    { "name": "web", "input": "talk", "preset": "web-720p" },
+    { "name": "poster", "input": "talk", "preset": "poster", "at": 3 },
+    { "name": "preview", "input": "talk", "preset": "gif-preview" }
+  ],
+  "metadata": { "source": "videxo-example" }
+}
