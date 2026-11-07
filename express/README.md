@@ -4,8 +4,7 @@ A small Express app that keeps the API key on the server and shows four things:
 
 1. create a job from JSON: `POST /v1/transcode` (one MP4) or `POST /v1/jobs` (an MP4, a poster and
    a GIF preview in one job), each with an idempotency key;
-2. receive the webhook and verify its signature with
-   [`standardwebhooks`](https://www.npmjs.com/package/standardwebhooks) over the raw body;
+2. receive the webhook and verify its signature with `@videxo/sdk` over the raw body;
 3. upload a file from the browser with a one-time upload URL the server creates;
 4. download the outputs through a fresh signed link (`GET /v1/jobs/{id}/outputs/{alias}`).
 
@@ -32,14 +31,23 @@ Without it, the page still follows the job by reading it every 2 seconds.
 
 | File | What it does |
 |---|---|
-| `src/videxo.ts` | Every call to the Videxo API, with `fetch`, and the webhook check. |
-| `src/app.ts` | The routes: uploads, jobs, downloads, the webhook and the error handler. |
+| `src/videxo.ts` | Every call to the Videxo API, with `@videxo/sdk`, and the webhook check. |
+| `src/app.ts` | The routes: uploads, jobs, downloads, client tokens for an app, the webhook and the error handler. |
 | `src/server.ts` | Starts the server. |
 | `public/index.html` | The page: upload, create, follow the job, download. |
 | `requests/*.json` | The JSON bodies of the two jobs. |
 
-## Switch to the SDK
+## Client tokens for an app
 
-`@videxo/sdk` is not on npm yet. Once it is, `src/videxo.ts` is the only file to change: each
-function becomes one call (`videxo.transcode()`, `videxo.jobs.create()`, `videxo.uploads.create()`,
-`videxo.outputs.url()`, `verifyWebhook()`), and the rest of the app stays as it is.
+`POST /api/client-tokens` and `POST /api/client-tokens/jobs` serve an app that holds a client token.
+They refuse everyone with `401` until you replace `currentUser` in `src/app.ts` with your own sign-in,
+and they mint only for the chain of the user who asks.
+
+## The SDK
+
+Every call goes through [`@videxo/sdk`](https://www.npmjs.com/package/@videxo/sdk), the TypeScript
+client of the API ([docs](https://videxo.io/docs/sdk)), and `src/videxo.ts` is the only file that
+imports it. Each function there is one call (`videxo.transcode()`, `videxo.jobs.create()`,
+`videxo.uploads.create()`, `videxo.outputs.url()`, `verifyWebhook()`); the SDK retries a request
+when a retry is safe, and an error answer of the API comes back as a `VidexoProblem` with its
+problem details.

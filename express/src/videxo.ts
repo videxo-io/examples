@@ -1,31 +1,21 @@
-import { Webhook } from 'standardwebhooks';
+import {
+  type ClientToken,
+  type Job,
+  type JobRequest,
+  type TranscodeRequest,
+  type Upload,
+  type WebhookEvent,
+  Videxo,
+  VidexoError,
+  verifyWebhook as verifySignature,
+} from '@videxo/sdk';
 import jobsBody from '../requests/jobs.json' with { type: 'json' };
 import transcodeBody from '../requests/transcode.json' with { type: 'json' };
 
-// Every call this app makes to the Videxo API, with plain `fetch`. It is the only file that talks to
-// Videxo: once `@videxo/sdk` is published, each function here becomes one call of the SDK and the
-// rest of the app stays as it is (README, "Switch to the SDK"). Runs on the server only: it reads
-// the API key.
+// Every call this app makes to the Videxo API, with `@videxo/sdk`. It is the only file that talks to
+// Videxo; the rest of the app imports these functions. Runs on the server only: it reads the API key.
 
-const API_URL = process.env.VIDEXO_API_URL ?? 'https://api.videxo.io';
-
-export type Output = {
-  alias: string;
-  name: string | null;
-  filename: string;
-  size_bytes: number | null;
-  download_url: string | null;
-  download_url_expires_at: string | null;
-};
-export type Job = {
-  id: string;
-  state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-  outputs: Output[];
-  error: { code: string; message: string } | null;
-  metadata: Record<string, string>;
-};
-export type Upload = { id: string; input_url: string; upload_url: string; upload_url_expires_at: string; expires_at: string };
-export type WebhookEvent = { type: 'job.succeeded' | 'job.failed' | 'job.cancelled'; timestamp: string; data: Job };
+export type { Job, Upload, WebhookEvent };
 
 /** An RFC 9457 problem details answer: programs branch on `code` (and `reason`), people read `detail`. */
 export type Problem = {
@@ -40,7 +30,7 @@ export type Problem = {
   errors?: { detail: string; pointer?: string; parameter?: string; header?: string }[];
 };
 
-/** An error answer of the API, with its problem details. */
+/** An error answer, with its problem details: the API's own, or this app's for a request it refuses. */
 export class VidexoProblem extends Error {
   readonly problem: Problem;
   constructor(problem: Problem) {
@@ -50,33 +40,33 @@ export class VidexoProblem extends Error {
 }
 
 // snippet:start request
-async function request<T>(path: string, init: { method?: string; body?: unknown; idempotencyKey?: string } = {}): Promise<T> {
+let client: Videxo | undefined;
+
+/** The SDK's client, made on the first call: it retries a 429, a 5xx it may and a network error. */
+function videxo(): Videxo {
   const apiKey = process.env.VIDEXO_API_KEY;
   if (!apiKey) throw new Error('Set VIDEXO_API_KEY in the server environment.');
-  const headers: Record<string, string> = { authorization: `Bearer ${apiKey}` };
-  if (init.body !== undefined) headers['content-type'] = 'application/json';
-  if (init.idempotencyKey) headers['idempotency-key'] = init.idempotencyKey;
-  const response = await fetch(`${API_URL}${path}`, {
-    method: init.method ?? 'GET',
-    headers,
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    redirect: 'manual',
-  });
-  if (response.status >= 400) throw await problemOf(response);
-  return (response.status >= 300 ? response.headers.get('location') : await response.json()) as T;
+  client ??= new Videxo({ apiKey, ...(process.env.VIDEXO_API_URL ? { baseUrl: process.env.VIDEXO_API_URL } : {}) });
+  return client;
 }
 
-async function problemOf(response: Response): Promise<VidexoProblem> {
-  const body = (await response.json().catch(() => null)) as Problem | null;
-  if (body && typeof body.code === 'string') return new VidexoProblem(body);
-  // Not problem details: a proxy or the network answered, not the API.
-  return new VidexoProblem({
-    type: 'about:blank',
-    title: 'The API answered with an error.',
-    status: response.status,
-    detail: `HTTP ${response.status}`,
-    code: 'http_error',
-  });
+/** The call's answer; a `VidexoError` becomes a `VidexoProblem` with the API's problem details as they came. */
+async function call<T>(send: (videxo: Videxo) => Promise<T>): Promise<T> {
+  try {
+    return await send(videxo());
+  } catch (error) {
+    if (!(error instanceof VidexoError)) throw error;
+    const body = error.body as Problem | undefined;
+    if (typeof body === 'object' && body !== null && typeof body.code === 'string') throw new VidexoProblem(body);
+    // No problem details: the network, a timeout or a proxy answered, not the API.
+    throw new VidexoProblem({
+      type: 'about:blank',
+      title: error.title,
+      status: error.status ?? 502,
+      detail: error.detail,
+      code: error.code,
+    });
+  }
 }
 // snippet:end request
 
@@ -86,30 +76,54 @@ const webhook = () => (process.env.VIDEXO_WEBHOOK_URL ? { webhook_url: process.e
 // snippet:start create
 /** One MP4 from one input: `POST /v1/transcode` with the body in requests/transcode.json. */
 export function transcode(input: string, idempotencyKey: string): Promise<Job> {
-  return request('/v1/transcode', { method: 'POST', body: { ...transcodeBody, input, ...webhook() }, idempotencyKey });
+  const body = { ...transcodeBody, input, ...webhook() } as TranscodeRequest;
+  return call((videxo) => videxo.transcode(body, { idempotencyKey }));
 }
 
 /** Several outputs from one input in one job: `POST /v1/jobs` with the body in requests/jobs.json. */
 export function createJob(input: string, idempotencyKey: string): Promise<Job> {
-  return request('/v1/jobs', { method: 'POST', body: { ...jobsBody, inputs: { talk: input }, ...webhook() }, idempotencyKey });
+  const body = { ...jobsBody, inputs: { talk: input }, ...webhook() } as JobRequest;
+  return call((videxo) => videxo.jobs.create(body, { idempotencyKey }));
 }
 // snippet:end create
 
 export function getJob(id: string): Promise<Job> {
-  return request(`/v1/jobs/${encodeURIComponent(id)}`);
+  return call((videxo) => videxo.jobs.get(id));
 }
 
 // snippet:start upload
 /** A one-time upload URL for a file the browser sends straight to Videxo; the API key stays here. */
 export function createUpload(file: { filename: string; size_bytes: number; content_type: string }): Promise<Upload> {
-  return request('/v1/uploads', { method: 'POST', body: file });
+  return call((videxo) => videxo.uploads.create(file));
 }
 // snippet:end upload
+
+// snippet:start client-token
+/** What an upload token may do: one upload of a video. It spends nothing, and it cannot create a job. */
+const UPLOAD_GRANT = { max_count: 1, max_size_bytes: 100_000_000, content_types: ['video/*'] };
+
+export function uploadToken(subject: string): Promise<ClientToken> {
+  return call((videxo) => videxo.clientTokens.create({ subject, uploads: UPLOAD_GRANT }));
+}
+
+/** A continuation of the app's token that may read the job too. */
+export function followToken(continues: string, jobId: string): Promise<ClientToken> {
+  return call((videxo) => videxo.clientTokens.forJob(jobId, { continues }));
+}
+
+/**
+ * The next token of the chain. A section left out is not granted, and only read job ids carry over, so
+ * a token that is still for its upload names the grant again; the count stays the chain's.
+ */
+export function refreshToken(continues: string, following: boolean): Promise<ClientToken> {
+  return call((videxo) => videxo.clientTokens.create(following ? { continues } : { continues, uploads: UPLOAD_GRANT }));
+}
+// snippet:end client-token
 
 // snippet:start download
 /** A fresh signed link to one output, from the redirect of `GET /v1/jobs/{id}/outputs/{alias}`. */
 export function outputUrl(jobId: string, alias: string): Promise<string> {
-  return request(`/v1/jobs/${encodeURIComponent(jobId)}/outputs/${encodeURIComponent(alias)}`);
+  return call((videxo) => videxo.outputs.url(jobId, alias));
 }
 // snippet:end download
 
@@ -119,12 +133,9 @@ export function outputUrl(jobId: string, alias: string): Promise<string> {
  * otherwise. `body` is the raw body exactly as received: parsed and serialized again, it no
  * longer matches the signature.
  */
-export function verifyWebhook(body: string, headers: Record<string, string | string[] | undefined>): WebhookEvent {
+export function verifyWebhook(body: string, headers: Record<string, string | string[] | undefined>): Promise<WebhookEvent> {
   const secret = process.env.VIDEXO_WEBHOOK_SECRET;
   if (!secret) throw new Error('Set VIDEXO_WEBHOOK_SECRET in the server environment.');
-  const single = Object.fromEntries(
-    Object.entries(headers).map(([name, value]) => [name, Array.isArray(value) ? value.join(' ') : (value ?? '')]),
-  );
-  return new Webhook(secret).verify(body, single) as WebhookEvent;
+  return verifySignature(body, headers, secret);
 }
 // snippet:end verify

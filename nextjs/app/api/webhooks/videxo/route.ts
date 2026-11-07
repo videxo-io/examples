@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   if (body === null) return new Response(null, { status: 413 });
   let event: WebhookEvent;
   try {
-    event = verifyWebhook(body, request.headers);
+    event = await verifyWebhook(body, request.headers);
   } catch {
     return new Response(null, { status: 400 });
   }
