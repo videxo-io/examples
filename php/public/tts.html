@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Videxo text to speech example</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 40rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      label {
+        display: block;
+        margin: 1rem 0;
+      }
+      textarea {
+        display: block;
+        width: 100%;
+      }
+      .problem {
+        color: #b3261e;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Text to speech</h1>
+    <p>
+      The server sends the text to Videxo (POST /v1/tts) in the language's default voice, then this page polls the job and plays its WAV
+      file. Speech is paid from purchased credits only, from a plan or a top-up.
+    </p>
+    <form id="speech">
+      <label>Text <textarea name="text" rows="4" maxlength="800" required></textarea></label>
+      <label
+        >Language
+        <select name="locale">
+          <option value="en">English</option>
+          <option value="pl">Polish</option>
+        </select>
+      </label>
+      <button type="submit">Make speech</button>
+    </form>
+    <p id="status" role="status"></p>
+    <div id="result"></div>
+    <div id="problem" class="problem" role="alert"></div>
+    <script type="module">
+      // POST /api/tts, then GET /api/jobs/:id until the job ends; the finished job carries each
+      // output's signed download_url.
+      const form = document.querySelector('#speech');
+      const status = document.querySelector('#status');
+      const result = document.querySelector('#result');
+      const problem = document.querySelector('#problem');
+
+      /** A JSON request to this app; an error answer is thrown as its problem details. */
+      async function call(path, body) {
+        const response = await fetch(
+          path,
+          body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {},
+        );
+        const json = await response.json().catch(() => null);
+        if (!response.ok) throw json ?? { title: 'The server answered with an error.', detail: `HTTP ${response.status}` };
+        return json;
+      }
+
+      function showProblem(error) {
+        const details = error && typeof error === 'object' ? error : { title: String(error) };
+        problem.replaceChildren(
+          Object.assign(document.createElement('p'), { textContent: [details.title, details.detail].filter(Boolean).join(' ') }),
+          ...(details.errors ?? []).map((item) =>
+            Object.assign(document.createElement('p'), {
+              textContent: `${item.pointer ?? item.parameter ?? item.header ?? ''} ${item.detail}`,
+            }),
+          ),
+        );
+        status.textContent = '';
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        problem.replaceChildren();
+        result.replaceChildren();
+        // The API refuses line breaks in the text: send them as spaces.
+        const text = form.elements.text.value.replace(/\s+/g, ' ').trim();
+        // One idempotency key per submit: a retry of this request returns the same job.
+        const key = crypto.randomUUID();
+        try {
+          let job = await call('/api/tts', { text, locale: form.elements.locale.value, key });
+          while (job.state === 'queued' || job.state === 'running') {
+            status.textContent = `Job ${job.id}: ${job.state}`;
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            job = await call(`/api/jobs/${job.id}`);
+          }
+          status.textContent = `Job ${job.id}: ${job.state}${job.error ? ` (${job.error.code}: ${job.error.message})` : ''}`;
+          result.replaceChildren(
+            ...job.outputs.flatMap((output) => {
+              const href = output.download_url;
+              const audio = Object.assign(document.createElement('audio'), { controls: true, src: href });
+              const link = Object.assign(document.createElement('a'), { href, textContent: `Download ${output.filename}` });
+              const item = document.createElement('p');
+              item.append(link);
+              return [audio, item];
+            }),
+          );
+        } catch (error) {
+          showProblem(error);
+        }
+      });
+    </script>
+  </body>
+</html>

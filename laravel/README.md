@@ -1,9 +1,10 @@
 # Videxo with Laravel 12
 
 These are additions to a fresh Laravel 12 app, not a whole application skeleton. PHP 8.2 or newer
-and Composer are required. The browser uploads straight to Videxo, creates one MP4 or several
-outputs from `requests/`, polls the job and follows fresh download links. The API key stays in
-the server environment. Problem details keep the API's status, fields and media type.
+and Composer are required. It uses the [`videxo/laravel`](https://videxo.io/docs/sdk/laravel)
+package. The browser uploads straight to Videxo, creates one MP4 or several outputs from
+`requests/`, polls the job and follows fresh download links. The API key stays in the server
+environment. Problem details keep the API's status, fields and media type.
 
 Docs: https://videxo.io/docs/integrations/laravel
 
@@ -15,7 +16,7 @@ From this downloaded example directory, first remember its location. Create the 
 EXAMPLE_DIR="$PWD"
 composer create-project laravel/laravel ../videxo-laravel '^12.0'
 cd ../videxo-laravel
-composer require standard-webhooks/standard-webhooks:^1.0.2
+composer require videxo/laravel
 cp -R "$EXAMPLE_DIR/app/." app/
 cp -R "$EXAMPLE_DIR/requests" .
 cp "$EXAMPLE_DIR/public/index.html" public/index.html
@@ -26,9 +27,9 @@ Then merge these additions, preserving the fresh app's other settings:
 1. Add the imports and routes from `routes/web.php`. Replace the existing `/` welcome route.
 2. Add the `videxo` entry from `config/services.php` to the existing returned array.
 3. Inside the existing `withMiddleware` callback in `bootstrap/app.php`, add the call from this
-   example's `bootstrap/app.php`. Do not replace that whole file. The webhook and only the two
-   demo POST routes skip CSRF because the shared static page has no session token. The two JSON
-   transformations skip the webhook so they cannot read its body before the controller's limit.
+   example's `bootstrap/app.php`. Do not replace that whole file. The two demo POST routes skip CSRF
+   because the shared static page has no session token. The package's webhook route is outside the
+   `web` group, so it has no CSRF check: its signature authenticates it.
 4. Append the names in this example's `.env.example` to the app's existing `.env`. Fill in the
    API key and webhook signing secret. `VIDEXO_API_URL` defaults to `https://api.videxo.io`;
    set it to your local API's origin for local testing.
@@ -50,15 +51,16 @@ returns a queued task, not the Videxo Job; do not use it as the page's response.
 
 ## Files
 
-- `app/Services/Videxo.php`: Laravel's `Http` client and the Standard Webhooks check.
-- `app/Exceptions/VidexoProblem.php`: the API's problem carried to the controller.
-- `app/Http/Controllers/VidexoController.php`: uploads, job create/read, download and webhook.
+- `app/Services/VidexoJobs.php`: creates a job from a request body and an upload.
+- `app/Http/Controllers/VidexoController.php`: uploads, job create/read and download.
+- `app/Listeners/RecordVidexoWebhook.php`: runs for each verified webhook. Laravel finds it by itself.
 - `app/Jobs/CreateVidexoJob.php`: the background alternative, with retry-safe creation.
 - `routes/web.php`, `bootstrap/app.php`, `config/services.php`: additions to merge.
 - `public/index.html`, `requests/*.json`: the shared page and the bodies read at runtime.
 
-Webhook deduplication uses Laravel's file cache explicitly, including a lock, so a fresh app needs
-no cache table. Clearing that cache also clears the remembered delivery ids.
+The package itself provides the client, the `POST /webhooks/videxo` route and the events.
+Webhook deduplication in the listener uses Laravel's file cache explicitly, including a lock, so a
+fresh app needs no cache table. Clearing that cache also clears the remembered delivery ids.
 
 ## Before exposing the app
 
@@ -68,15 +70,10 @@ instead authenticated by its signature. Keep slow work in your own queue and ack
 seconds. For durable deduplication, put `webhook-id` in a unique database column in the same
 transaction as the business update. The demo's local file storage is for a single server.
 
-## Switch the client
-
-Every Videxo call and the webhook check sit in `app/Services/Videxo.php`. That is the only file to change if you
-replace plain HTTP with another client. The TypeScript `@videxo/sdk` is not a PHP or Ruby package.
-
 ## Webhook body size
 
-The handler checks `Content-Length` first, then reads at most 2,097,153 raw bytes. Bodies over
-2 MiB (2,097,152 bytes) receive 413 before verification. Exactly 2 MiB is accepted when signed.
+The package's route checks `Content-Length` first, then reads at most 2,097,153 raw bytes. Bodies
+over 2 MiB (2,097,152 bytes) receive 413 before verification. Exactly 2 MiB is accepted when signed.
 PHP's `post_max_size` and reverse proxy body limits also apply; keep them at least `2M` (PHP's
 default is `8M`).
 
@@ -86,7 +83,6 @@ With the server's webhook secret configured, POST `{}` to `/webhooks/videxo` wit
 `webhook-id: msg_manual`, `webhook-timestamp: <current Unix seconds>` and `webhook-signature: v1`.
 Repeat with `webhook-signature: garbage`. Both must answer 400 without runtime errors. A valid
 signed body and a pair of valid signatures separated by a space must still answer 204.
-The format guard runs before the signing library, which can otherwise throw on a malformed list.
 
 ## Webhook size regression check
 

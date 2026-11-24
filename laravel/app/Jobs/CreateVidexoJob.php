@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Services\Videxo;
+use App\Services\VidexoJobs;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -17,12 +17,12 @@ final class CreateVidexoJob implements ShouldQueue
 
     public function __construct(public string $kind, public string $input) {}
 
-    public function handle(Videxo $videxo): void
+    public function handle(VidexoJobs $jobs): void
     {
         // The service derives the same key from the upload on each retry.
-        $job = $videxo->createJob($this->kind, $this->input);
+        $job = $jobs->create($this->kind, $this->input);
         // Your code: store this id on the order so your webhook can update it later.
-        Log::info('Videxo job created', ['job_id' => $job['id']]);
+        Log::info('Videxo job created', ['job_id' => $job->id]);
     }
 }
 // snippet:end background

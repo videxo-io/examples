@@ -84,8 +84,9 @@ struct TokenFlow: Sendable {
 
         onStatus("Uploading")
         let copy = try copyIntoContainer(file)
+        // A file past 100 MB is created as a multipart upload; the uploader sends it a part at a time.
         let upload = try await videxo.uploads.create(forFile: copy)
-        let started = try Uploads.shared.uploader.start(file: copy, to: upload.uploadURL, tag: copy.lastPathComponent)
+        let started = try await Uploads.shared.uploader.start(file: copy, upload: upload, tag: copy.lastPathComponent)
         let completed = try await Uploads.shared.completion(of: started.id)
 
         // Only your backend creates the job, and answers a continuation that may read it. The token cannot.

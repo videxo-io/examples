@@ -3,7 +3,7 @@ require_once __DIR__.'/../../src/respond.php';
 allowMethods(['POST']);
 
 // snippet:start webhook
-respond(function (Videxo $videxo): void {
+respond(function (): void {
     $max = 2_097_152; // 2 MiB of raw bytes, before signature verification or JSON parsing.
     if (isset($_SERVER['CONTENT_LENGTH']) && (float) $_SERVER['CONTENT_LENGTH'] > $max) {
         http_response_code(413);
@@ -22,10 +22,9 @@ respond(function (Videxo $videxo): void {
         return;
     }
     // Verify these exact bytes, never parsed and serialized again.
-    $headers = array_change_key_case(getallheaders(), CASE_LOWER);
     try {
-        $event = $videxo->verifyWebhook($raw, $headers);
-    } catch (\StandardWebhooks\Exception\WebhookVerificationException) {
+        $event = \Videxo\Webhook::fromEnvironment()->verify($raw, getallheaders());
+    } catch (\Videxo\Exception\WebhookVerificationException) {
         http_response_code(400);
         return;
     }
@@ -41,11 +40,10 @@ respond(function (Videxo $videxo): void {
         if (!flock($file, LOCK_EX)) throw new RuntimeException('Could not lock webhook storage.');
         $saved = stream_get_contents($file);
         $handled = $saved === '' ? [] : json_decode($saved, true, 512, JSON_THROW_ON_ERROR);
-        $id = $headers['webhook-id'];
-        if (!isset($handled[$id])) {
+        if (!isset($handled[$event->id])) {
             // Your code: mark the order done or enqueue slow work. Log only ids, never signed URLs.
-            error_log($event['type'].' '.$event['data']['id']);
-            $handled[$id] = true;
+            error_log($event->type.' '.$event->job?->id);
+            $handled[$event->id] = true;
             rewind($file);
             $json = json_encode($handled, JSON_THROW_ON_ERROR);
             if (fwrite($file, $json) !== strlen($json) || !ftruncate($file, strlen($json)) || !fflush($file)) {

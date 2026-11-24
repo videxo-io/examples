@@ -6,6 +6,12 @@ if ($path === '/' || $path === '/index.html') {
     if ($_SERVER['REQUEST_METHOD'] !== 'GET') { http_response_code(405); return; }
     header('Content-Type: text/html; charset=utf-8');
     readfile(__DIR__.'/index.html');
+} elseif ($path === '/tts' || $path === '/tts.html') {
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET') { http_response_code(405); return; }
+    header('Content-Type: text/html; charset=utf-8');
+    readfile(__DIR__.'/tts.html');
+} elseif ($path === '/api/tts' || $path === '/api/tts.php') {
+    require __DIR__.'/api/tts.php';
 } elseif ($path === '/api/uploads' || $path === '/api/uploads.php') {
     require __DIR__.'/api/uploads.php';
 } elseif ($path === '/api/jobs' || $path === '/api/jobs.php') {

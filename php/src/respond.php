@@ -3,13 +3,15 @@
 declare(strict_types=1);
 
 require_once __DIR__.'/../vendor/autoload.php';
-require_once __DIR__.'/Videxo.php';
+require_once __DIR__.'/videxo.php';
 
-function jsonResponse(array $body, int $status = 200, string $type = 'application/json'): void
+use Videxo\Exception\ApiException;
+
+function jsonResponse(array|JsonSerializable $body, int $status = 200, string $type = 'application/json'): void
 {
     http_response_code($status);
     header('Content-Type: '.$type);
-    echo json_encode($body, JSON_THROW_ON_ERROR);
+    echo json_encode($body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 }
 
 function requestBody(): array
@@ -19,10 +21,7 @@ function requestBody(): array
         if (!is_array($body)) throw new JsonException();
         return $body;
     } catch (JsonException) {
-        throw new VidexoProblem([
-            'type' => 'about:blank', 'title' => 'The request is not valid.', 'status' => 400,
-            'detail' => 'Send a JSON object.', 'code' => 'invalid_request',
-        ]);
+        throw invalidRequest('Send a JSON object.');
     }
 }
 
@@ -30,9 +29,14 @@ function requestBody(): array
 function respond(callable $route): void
 {
     try {
-        $route(new Videxo());
-    } catch (VidexoProblem $error) {
-        jsonResponse($error->problem, $error->problem['status'], 'application/problem+json');
+        $route();
+    } catch (ApiException $error) {
+        // The API's problem details as they came, or the same fields for this app's own refusal.
+        $problem = is_array($error->body) ? $error->body : [
+            'type' => $error->type ?? 'about:blank', 'title' => $error->title,
+            'status' => $error->status, 'detail' => $error->detail, 'code' => $error->errorCode,
+        ];
+        jsonResponse($problem, $error->status, 'application/problem+json');
     } catch (Throwable $error) {
         // Keep diagnostics free of request bodies, signed URLs and arbitrary exception messages.
         error_log('Videxo endpoint error: '.$error::class);

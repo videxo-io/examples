@@ -1,11 +1,10 @@
 {
   "name": "videxo/php-example",
-  "description": "A Videxo example with plain PHP and cURL.",
+  "description": "A Videxo example with plain PHP and the Videxo PHP SDK.",
   "type": "project",
   "license": "MIT",
   "require": {
     "php": "^8.2",
-    "ext-curl": "*",
-    "standard-webhooks/standard-webhooks": "^1.0.2"
+    "videxo/videxo-php": "^0.2"
   }
 }

@@ -2,7 +2,10 @@
 
 A Jetpack Compose app that picks a video, uploads it straight to Videxo with a one-time URL from
 your backend, has your backend create the job, follows the job and opens the outputs. The app never
-holds an API key; it talks to your backend only.
+holds an API key; it talks to your backend only, and needs no Videxo package.
+
+`app/src/main/java/io/videxo/example/token/` holds the same flow with a client token and the Videxo
+Android SDK, which is not published yet: see [below](#the-client-token-flow).
 
 Docs: https://videxo.io/docs/integrations/kotlin
 
@@ -39,3 +42,26 @@ verify the webhook.
 |---|---|
 | `BackendClient.kt` | The calls to your backend with OkHttp: upload URL, streamed PUT, create, wait, download link. |
 | `MainActivity.kt` | The screen: pick, upload, create, follow the job, open the outputs. |
+
+## The client token flow
+
+The files in `token/` use the Videxo Android SDK (`io.videxo:videxo-android`), which is not on Maven
+Central yet; they show the flow it will take. Its backend is the Express example, which also answers
+two routes for a signed-in user: `POST /api/client-tokens` (no body fields: a new upload token;
+`continues`: the next token of that user's chain) and `POST /api/client-tokens/jobs` (`continues` and
+`input_url`). These routes refuse everyone with `401` until you replace `currentUser` in its
+`src/app.ts` with your own sign-in, and pass your user's session to `TokenBackend`.
+
+1. The app asks your backend for a client token.
+2. The uploader copies the picked file into the app's storage, the one read of it, which gives the
+   exact size; the app creates the upload with the token and starts it through WorkManager, which
+   goes on when the app is in the background.
+3. It sends the upload's `input_url` to your backend, which creates the job with its API key and
+   answers a continuation of the token that may read the job.
+4. It follows the job with that token. When a token is about to end, `getToken` asks your backend
+   for the next one.
+
+| File | What it does |
+|---|---|
+| `token/TokenBackend.kt` | The calls to your backend: mint a token, refresh it, create the job. |
+| `token/TokenFlow.kt` | The flow: copy, create, upload through WorkManager, create the job, follow it. |

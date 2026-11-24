@@ -8,4 +8,4 @@ Route::post('/api/uploads', [VidexoController::class, 'upload']);
 Route::post('/api/jobs', [VidexoController::class, 'create']);
 Route::get('/api/jobs/{id}', [VidexoController::class, 'show']);
 Route::get('/api/jobs/{id}/outputs/{alias}', [VidexoController::class, 'download']);
-Route::post('/webhooks/videxo', [VidexoController::class, 'webhook']);
+// videxo/laravel registers POST /webhooks/videxo itself.
